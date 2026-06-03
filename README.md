@@ -265,3 +265,31 @@ curl -s "$VIBE_PROXY/key/info" \
 ---
 
 *Never paste your key or the proxy URL in a public repo, gist, or screenshot. Both come from the cohort channel.*
+
+## 7. Chapter 1 check (`/ch1`)
+
+When you finish Chapter 1, prove it in one step. The script tests your proxy API +
+agent and your first GitHub work, then posts a public gist.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/vibe-code-tours/vibecode-setup/main/check-ch1.sh -o check-ch1.sh
+bash check-ch1.sh
+```
+
+It checks:
+1. Proxy API works (real chat completion with your key)
+2. An AI agent works (claude **or** opencode)
+3. GitHub account (`gh auth`)
+4. Profile repo `github.com/<you>/<you>` (with README)
+5. A pull request to the Vibe Code Tours website repo
+
+If everything passes it posts a gist and prints the link. Submit it in Discord or
+Telegram:
+
+```
+/ch1 <gist-url>
+```
+
+The bot re-checks your GitHub profile repo + website PR server-side and marks
+Chapter 1 done. Needs `gh` ([cli.github.com](https://cli.github.com)) installed and
+`gh auth login` completed.
