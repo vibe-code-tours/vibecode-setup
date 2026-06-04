@@ -11,6 +11,10 @@
 # (project pin via .python-version), git, Claude Code, opencode CLI. Then verifies.
 # System Python 3.12-3.14 all accepted by verify.
 # git, Claude Code. Then verifies everything. No repo clone required.
+#
+# WSL note: if you ALREADY have Claude Code installed on native Windows, this
+# script detects it (claude.exe surfaced on the WSL PATH) and does NOT install a
+# second copy — api-setup.sh will configure that existing Windows install.
 
 set -u
 
@@ -94,37 +98,53 @@ fi
 # ---------- 4. Claude Code ----------
 # Two install paths: official installer (curl) first, npm fallback for regions
 # where claude.ai is blocked (Myanmar, etc — npm registry is not geo-restricted).
+#
+# WSL special case: if `claude` already resolves to a native Windows binary
+# (path under /mnt/), we do NOT install a Linux copy. A second install would
+# cause a split-brain (two configs, two logins). api-setup.sh configures the
+# existing Windows install instead.
 say "4/5  Claude Code"
-if ! have claude; then
-  installed=0
-  # Path A: official installer
-  if curl -fsSL https://claude.ai/install.sh -o /tmp/_claude_install.sh 2>/dev/null \
-     && bash /tmp/_claude_install.sh >/dev/null 2>&1; then
-    export PATH="$HOME/.local/bin:$PATH"
-    hash -r 2>/dev/null || true     # flush bash command-not-found cache
-    if have claude || [ -x "$HOME/.local/bin/claude" ]; then
-      ok "Claude Code installed (official curl)"; installed=1
+CLAUDE_BIN="$(command -v claude 2>/dev/null || true)"
+case "$CLAUDE_BIN" in
+  /mnt/*)
+    ok "Claude Code: native Windows install detected (via WSL)"
+    printf '      %s\n' "$CLAUDE_BIN"
+    warn "Not installing a Linux copy (avoids a split-brain second config)."
+    warn "Next step — api-setup.sh writes the proxy config into THAT install's"
+    warn "Windows .claude/settings.json, so your existing 'claude' just works."
+    ;;
+  "")
+    installed=0
+    # Path A: official installer
+    if curl -fsSL https://claude.ai/install.sh -o /tmp/_claude_install.sh 2>/dev/null \
+       && bash /tmp/_claude_install.sh >/dev/null 2>&1; then
+      export PATH="$HOME/.local/bin:$PATH"
+      hash -r 2>/dev/null || true     # flush bash command-not-found cache
+      if have claude || [ -x "$HOME/.local/bin/claude" ]; then
+        ok "Claude Code installed (official curl)"; installed=1
+      fi
     fi
-  fi
-  # Path B: npm fallback (works when claude.ai is blocked)
-  if [ "$installed" = 0 ] && have npm; then
-    if npm install -g @anthropic-ai/claude-code >/dev/null 2>&1; then
-      hash -r 2>/dev/null || true
-      have claude && { ok "Claude Code installed (npm fallback)"; installed=1; }
+    # Path B: npm fallback (works when claude.ai is blocked)
+    if [ "$installed" = 0 ] && have npm; then
+      if npm install -g @anthropic-ai/claude-code >/dev/null 2>&1; then
+        hash -r 2>/dev/null || true
+        have claude && { ok "Claude Code installed (npm fallback)"; installed=1; }
+      fi
     fi
-  fi
-  if [ "$installed" = 0 ]; then
-    warn "Claude Code install failed both paths (curl + npm)."
-    warn "Likely cause: claude.ai is blocked at your network/country level."
-    warn "For Class 1 you can still join — install an alternative CLI:"
-    warn "  npm install -g @google/gemini-cli       # generous free tier"
-    warn "  npm install -g opencode-ai              # model-agnostic"
-    warn "See SETUP.md 'If Claude Code is blocked in your region' for details."
-  fi
-  rm -f /tmp/_claude_install.sh
-else
-  skip "claude $(claude --version 2>/dev/null | head -1)"
-fi
+    if [ "$installed" = 0 ]; then
+      warn "Claude Code install failed both paths (curl + npm)."
+      warn "Likely cause: claude.ai is blocked at your network/country level."
+      warn "For Class 1 you can still join — install an alternative CLI:"
+      warn "  npm install -g @google/gemini-cli       # generous free tier"
+      warn "  npm install -g opencode-ai              # model-agnostic"
+      warn "See SETUP.md 'If Claude Code is blocked in your region' for details."
+    fi
+    rm -f /tmp/_claude_install.sh
+    ;;
+  *)
+    skip "claude $(claude --version 2>/dev/null | head -1)"
+    ;;
+esac
 
 # ---------- 5. opencode CLI (open-source agent CLI) ----------
 # Default install alongside Claude Code. Path A = official installer, Path B = npm.

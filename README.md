@@ -41,6 +41,11 @@ curl -fsSL https://raw.githubusercontent.com/vibe-code-tours/vibecode-setup/main
 Installs Node, Python, git, Claude Code, opencode. Idempotent — safe to re-run.
 Native Windows: install WSL first (`wsl --install` in PowerShell, reboot, open Ubuntu, re-run).
 
+> **Already have Claude Code on Windows?** Run setup inside WSL anyway. It detects
+> your existing Windows `claude` and won't install a second copy. `api-setup.sh`
+> then writes the proxy config into that install's `.claude/settings.json` — your
+> same `claude` command just works (no split-brain second login).
+
 ---
 
 ## 1. Quick setup (easiest — key file)
@@ -77,7 +82,8 @@ claude      # Claude Code
 opencode    # opencode
 ```
 
-Restore personal Claude login later: `bash api-setup.sh --restore`
+Restore your previous Claude config later: `bash api-setup.sh --restore`
+(api-setup makes a full timestamped backup at `~/.claude-backup-<ts>/` before changing anything.)
 
 > Advanced: skip the key file and pass args — `bash api-setup.sh sk-KEY https://proxy-url`
 
@@ -102,6 +108,7 @@ export OPENAI_API_KEY="sk-YOUR-KEY"
 
 > ⚠️ **Already logged into Claude Code (Max/Pro)?** The stored login overrides these vars.
 > Remove it first: `mv ~/.claude/.credentials.json ~/.claude/.credentials.json.bak`
+> (The `api-setup.sh` script does this for you automatically, with a full backup.)
 
 Reload (`source ~/.zshrc`), then run `claude` or `opencode`.
 

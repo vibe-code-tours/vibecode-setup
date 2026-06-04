@@ -2,13 +2,20 @@
 # api-setup.sh — point Claude Code + opencode at the bootcamp LLM proxy.
 #   ./api-setup.sh <KEY> <PROXY_URL>
 #   VIBE_KEY=sk-... VIBE_PROXY=https://<proxy> ./api-setup.sh
-#   ./api-setup.sh --restore        # bring personal Claude login back
+#   ./api-setup.sh --restore            # bring previous Claude config back
+#   ./api-setup.sh --restore <bak-dir>  # restore a specific snapshot
 #
-# TIP: `source api-setup.sh` (instead of running it) applies the config to your
-# CURRENT shell immediately — no second `source ~/.zshrc` needed.
+# Cross-platform: Linux, macOS, WSL. If you run inside WSL but Claude Code is a
+# NATIVE WINDOWS install (claude.exe surfaced on the WSL PATH), this configures
+# THAT install — it writes the proxy config into Windows' .claude/settings.json
+# so the same `claude` you already use just works. No second install needed.
+#
+# TIP: `source api-setup.sh` applies shell env to your CURRENT shell immediately.
 set -euo pipefail
 
-# Detect if this script was sourced (then env exports survive into your shell).
+have() { command -v "$1" >/dev/null 2>&1; }
+
+# ---------- sourced? (then env exports survive into your shell) ----------
 SOURCED=0
 if [ -n "${ZSH_EVAL_CONTEXT:-}" ]; then
   case "$ZSH_EVAL_CONTEXT" in *:file) SOURCED=1;; esac
@@ -16,7 +23,7 @@ elif [ -n "${BASH_SOURCE:-}" ]; then
   [ "${BASH_SOURCE[0]}" != "$0" ] && SOURCED=1
 fi
 
-# Resolve this script's path (works run or sourced, bash or zsh) for accurate hints.
+# ---------- resolve this script's path (run or sourced, bash or zsh) ----------
 if [ -n "${BASH_SOURCE:-}" ]; then
   SELF="${BASH_SOURCE[0]}"
 elif [ -n "${ZSH_VERSION:-}" ]; then
@@ -24,31 +31,117 @@ elif [ -n "${ZSH_VERSION:-}" ]; then
 else
   SELF="$0"
 fi
-# --restore is a file op (no sourcing needed) -> always show the run-form command.
 case "$SELF" in
   bash|-bash|zsh|-zsh|sh|-sh|"") SELF_CMD="bash api-setup.sh" ;;
   *)                              SELF_CMD="bash $SELF" ;;
 esac
 
-CRED="$HOME/.claude/.credentials.json"
-CRED_BAK="$HOME/.claude/.credentials.json.vibe-bak"
+# ---------- detect Claude install: nix (Linux/macOS) | windows (via WSL) ----------
+# Sets: CLAUDE_KIND, CLAUDE_DIR (holds settings.json/.credentials.json),
+#       CLAUDE_JSON (the .claude.json login/config file).
+detect_claude() {
+  local bin; bin="$(command -v claude 2>/dev/null || true)"
+  CLAUDE_KIND="nix"
+  case "$bin" in
+    /mnt/*) CLAUDE_KIND="windows" ;;   # a Windows binary leaked into WSL PATH
+  esac
+  if [ "$CLAUDE_KIND" = "windows" ]; then
+    local up="" wh=""
+    up="$(cmd.exe /c 'echo %USERPROFILE%' 2>/dev/null | tr -d '\r' || true)"
+    [ -n "$up" ] && wh="$(wslpath "$up" 2>/dev/null || true)"
+    if [ -z "$wh" ] || [ ! -d "$wh" ]; then
+      # fallback: carve /mnt/<drive>/Users/<name> out of the binary path
+      wh="$(printf '%s' "$bin" | sed -E 's#(/mnt/[a-z]/Users/[^/]+).*#\1#')"
+    fi
+    # Guard: if the Windows home still doesn't resolve to a real directory
+    # (cmd.exe unavailable, localized/non-standard profile path, or a false
+    # /mnt match), DON'T fall through to "$wh/.claude" — an empty $wh would
+    # target the root filesystem. Fall back to the Linux config instead.
+    if [ -n "$wh" ] && [ -d "$wh" ]; then
+      CLAUDE_DIR="$wh/.claude"
+      CLAUDE_JSON="$wh/.claude.json"
+      echo "Detected Claude Code: native Windows install (via WSL) — home: $wh"
+    else
+      echo "WARN: a Windows claude ($bin) is on PATH but its Windows home could not" >&2
+      echo "      be resolved — using the Linux config (~/.claude) instead. If your" >&2
+      echo "      Windows claude ignores the proxy, configure it manually (see README)." >&2
+      CLAUDE_KIND="nix"
+      CLAUDE_DIR="$HOME/.claude"
+      CLAUDE_JSON="$HOME/.claude.json"
+    fi
+  else
+    CLAUDE_DIR="$HOME/.claude"
+    CLAUDE_JSON="$HOME/.claude.json"
+  fi
+}
 
+# ---------- full timestamped backup of the previous Claude config ----------
+# Snapshots .claude.json + .credentials.json + settings.json to
+# ~/.claude-backup-<ts>/ (always on the Linux/macOS side) with a manifest that
+# records each file's origin path so --restore can put them back exactly.
+backup_claude() {
+  local ts bak f
+  ts="$(date +%Y%m%d-%H%M%S)"
+  bak="$HOME/.claude-backup-$ts"
+  mkdir -p "$bak"
+  : > "$bak/manifest.tsv"
+  for f in "$CLAUDE_JSON" "$CLAUDE_DIR/.credentials.json" "$CLAUDE_DIR/settings.json"; do
+    if [ -f "$f" ]; then
+      cp -p "$f" "$bak/$(basename "$f")"
+      printf '%s\t%s\n' "$f" "$(basename "$f")" >> "$bak/manifest.tsv"
+    fi
+  done
+  if [ -s "$bak/manifest.tsv" ]; then
+    printf '%s\n' "$bak" > "$HOME/.claude-backup-latest"
+    echo "Backed up previous Claude config -> $bak"
+    echo "  (restore later: $SELF_CMD --restore)"
+  else
+    rmdir "$bak" 2>/dev/null || true
+  fi
+}
+
+# ---------- restore ----------
 if [ "${1:-}" = "--restore" ]; then
-  [ -f "$CRED_BAK" ] && mv "$CRED_BAK" "$CRED" && echo "Restored personal Claude login." \
-    || echo "No backup at $CRED_BAK."
-  echo "Also remove the vibe-code-tours block from your shell profile to fully revert."
+  detect_claude
+  BAK="${2:-}"
+  [ -z "$BAK" ] && BAK="$(cat "$HOME/.claude-backup-latest" 2>/dev/null || true)"
+  if [ -n "$BAK" ] && [ -f "$BAK/manifest.tsv" ]; then
+    while IFS=$'\t' read -r origin base; do
+      [ -f "$BAK/$base" ] || continue
+      mkdir -p "$(dirname "$origin")"
+      cp -p "$BAK/$base" "$origin" && echo "  restored $origin"
+    done < "$BAK/manifest.tsv"
+    echo "Restored previous Claude config from $BAK"
+  else
+    # legacy fallback (older api-setup only backed up credentials)
+    CRED="$CLAUDE_DIR/.credentials.json"; CRED_BAK="$CRED.vibe-bak"
+    if [ -f "$CRED_BAK" ]; then
+      mv "$CRED_BAK" "$CRED"; echo "Restored personal Claude login (legacy backup)."
+    else
+      echo "No backup found (looked for ~/.claude-backup-* and $CRED_BAK)." >&2
+    fi
+  fi
+  # drop the proxy env block from settings.json so the personal login takes over
+  if have node && [ -f "$CLAUDE_DIR/settings.json" ]; then
+    node -e '
+      const fs=require("fs"),f=process.argv[1];
+      let j={};try{j=JSON.parse(fs.readFileSync(f,"utf8"))}catch(e){}
+      if(j.env){for(const k of ["ANTHROPIC_BASE_URL","ANTHROPIC_AUTH_TOKEN","ANTHROPIC_API_KEY","ANTHROPIC_MODEL","ANTHROPIC_SMALL_FAST_MODEL","CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY"]) delete j.env[k];
+       if(Object.keys(j.env).length===0) delete j.env;}
+      fs.writeFileSync(f,JSON.stringify(j,null,2));
+    ' "$CLAUDE_DIR/settings.json" 2>/dev/null || true
+  fi
+  echo "Also remove the '# >>> vibe-code-tours >>>' block from your shell profile to fully revert."
   exit 0
 fi
 
-# Auto-load a key file (beginner path: no args, just edit vibe-key.env + run).
-# Looks next to the script, then in the current dir.
+# ---------- load a key file (beginner path: edit vibe-key.env, run) ----------
 SELF_DIR="$(cd "$(dirname "$SELF")" 2>/dev/null && pwd || echo .)"
 for KF in "$SELF_DIR/vibe-key.env" "./vibe-key.env"; do
   if [ -f "$KF" ]; then
     # shellcheck disable=SC1090
     set -a; . "$KF"; set +a
-    echo "Loaded key file: $KF"
-    break
+    echo "Loaded key file: $KF"; break
   fi
 done
 
@@ -62,13 +155,46 @@ PROXY="${PROXY%/}"; PROXY="${PROXY%/v1}"   # strip trailing slash + accidental /
 if [ -z "$KEY" ]; then printf "Paste your key (sk-...): "; read -r KEY; fi
 case "$KEY" in sk-*) : ;; *) echo "ERROR: key must start sk-" >&2; exit 1;; esac
 
-# 1. back up + remove stored Claude login (it overrides env vars)
+# ---------- locate + back up the Claude install ----------
+detect_claude
+backup_claude
+
+# 1. remove stored Claude login (a saved login overrides our env/settings)
+CRED="$CLAUDE_DIR/.credentials.json"
 if [ -f "$CRED" ]; then
-  cp "$CRED" "$CRED_BAK"; rm -f "$CRED"
-  echo "Backed up Claude login -> $CRED_BAK  (restore: $SELF_CMD --restore)"
+  rm -f "$CRED"
+  echo "Cleared stored Claude login (backed up above; restore: $SELF_CMD --restore)"
 fi
 
-# 2. shell profile
+# 2. write proxy config into Claude's settings.json env block.
+#    This is the cross-platform anchor: Claude Code reads its OWN settings.json
+#    regardless of shell — so a native Windows claude.exe launched from WSL
+#    picks it up too (a shell-profile export alone would NOT reach it).
+mkdir -p "$CLAUDE_DIR"
+SF="$CLAUDE_DIR/settings.json"
+[ -f "$SF" ] || printf '{}\n' > "$SF"
+if have node; then
+  VIBE_KEY_V="$KEY" VIBE_PROXY_V="$PROXY" node -e '
+    const fs=require("fs"),f=process.argv[1];
+    let j={};try{j=JSON.parse(fs.readFileSync(f,"utf8"))}catch(e){}
+    j.env=Object.assign({},j.env,{
+      ANTHROPIC_BASE_URL:process.env.VIBE_PROXY_V,
+      ANTHROPIC_AUTH_TOKEN:process.env.VIBE_KEY_V,
+      ANTHROPIC_API_KEY:process.env.VIBE_KEY_V,
+      ANTHROPIC_MODEL:"mimo-v2.5-pro",
+      ANTHROPIC_SMALL_FAST_MODEL:"mimo-v2.5",
+      CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY:"1"
+    });
+    fs.writeFileSync(f,JSON.stringify(j,null,2));
+  ' "$SF"
+  echo "Claude proxy config -> $SF (env block)"
+else
+  echo "WARN: node not found — could not patch settings.json." >&2
+  echo "      Shell env (below) still configures a Linux claude, but a Windows" >&2
+  echo "      claude.exe needs node to apply. Install Node, re-run." >&2
+fi
+
+# 3. shell profile (Linux/macOS claude + opencode convenience)
 case "${SHELL##*/}" in
   zsh)  PROFILE="$HOME/.zshrc" ;;
   bash) PROFILE="$HOME/.bashrc" ;;
@@ -99,7 +225,7 @@ vibe-model() { export OPENAI_MODEL="\$1"; echo "model: \$1"; }
 $ME
 EOF
 
-# 3. opencode config file (env alone is unreliable for opencode)
+# 4. opencode config file (env alone is unreliable for opencode)
 OC="$HOME/.config/opencode"; mkdir -p "$OC"
 cat > "$OC/opencode.json" <<OCJSON
 {
@@ -121,7 +247,7 @@ cat > "$OC/opencode.json" <<OCJSON
 OCJSON
 echo "opencode config -> $OC/opencode.json"
 
-# 4. live test (Anthropic /v1/messages — what Claude Code calls)
+# 5. live test (Anthropic /v1/messages — what Claude Code calls)
 echo ""; echo "Testing key ..."
 code=$(curl -s -o /tmp/vibe_t.json -w "%{http_code}" "$PROXY/v1/messages" \
   -H "x-api-key: $KEY" -H "anthropic-version: 2023-06-01" -H "Content-Type: application/json" \
@@ -135,13 +261,14 @@ esac
 rm -f /tmp/vibe_t.json 2>/dev/null || true
 
 echo ""
-echo "Done. Config -> $PROFILE"
+echo "Done."
+echo "  Claude settings : $SF"
+echo "  Shell profile   : $PROFILE"
 echo "Models: mimo-v2.5 (fast) · mimo-v2.5-pro (reasoning) · deepseek-flash"
 echo "Switch: Claude Code  /model mimo-v2.5-pro   ·   opencode  --model vibe/mimo-v2.5-pro"
-echo "Restore personal Claude login:  $SELF_CMD --restore"
+echo "Restore previous Claude config:  $SELF_CMD --restore"
 echo ""
 if [ "$SOURCED" = "1" ]; then
-  # sourced: load the profile NOW so it is live in this shell
   # shellcheck disable=SC1090
   . "$PROFILE"
   echo "✅ Active in THIS shell. Run:  claude   (or)   opencode"
@@ -150,6 +277,6 @@ else
   echo ""
   echo "    source $PROFILE"
   echo ""
-  echo "(or next time: 'source api-setup.sh' to skip this step)"
+  echo "(Claude Code also reads its settings.json, so a fresh terminal works too.)"
   echo "Then run:  claude   (or)   opencode"
 fi
