@@ -11,16 +11,23 @@
 # so the same `claude` you already use just works. No second install needed.
 #
 # TIP: `source api-setup.sh` applies shell env to your CURRENT shell immediately.
-set -euo pipefail
-
 have() { command -v "$1" >/dev/null 2>&1; }
 
 # ---------- sourced? (then env exports survive into your shell) ----------
+# Detect BEFORE touching shell options. When sourced, `set -e` / `exit` act on
+# the user's INTERACTIVE shell and would close their terminal.
 SOURCED=0
 if [ -n "${ZSH_EVAL_CONTEXT:-}" ]; then
   case "$ZSH_EVAL_CONTEXT" in *:file) SOURCED=1;; esac
 elif [ -n "${BASH_SOURCE:-}" ]; then
   [ "${BASH_SOURCE[0]}" != "$0" ] && SOURCED=1
+fi
+
+# Strict mode ONLY when executed. Sourced: leave the shell's options untouched
+# (a stray `set -e` would close the terminal on the next failing command) and
+# the `exit`s below become `return`s via the SOURCED guard.
+if [ "$SOURCED" = 0 ]; then
+  set -euo pipefail
 fi
 
 # ---------- resolve this script's path (run or sourced, bash or zsh) ----------
@@ -156,7 +163,40 @@ if [ "${1:-}" = "--restore" ]; then
       fs.writeFileSync(f,JSON.stringify(j,null,2));
     ' "$CLAUDE_DIR/settings.json" 2>/dev/null || true
   fi
-  echo "Also remove the '# >>> vibe-code-tours >>>' block from your shell profile to fully revert."
+
+  # remove the vibe-code-tours block from every shell profile (it re-exports the
+  # proxy vars on each new terminal, so leaving it in undoes the restore)
+  RMS="# >>> vibe-code-tours >>>"; RME="# <<< vibe-code-tours <<<"
+  for RP in "$HOME/.zshrc" "$HOME/.bashrc" "$HOME/.profile"; do
+    [ -f "$RP" ] || continue
+    if grep -q "$RMS" "$RP" 2>/dev/null; then
+      rtmp=$(mktemp); sed "/$RMS/,/$RME/d" "$RP" > "$rtmp" && mv "$rtmp" "$RP"
+      echo "  removed proxy block from $RP"
+    fi
+  done
+
+  # delete the standalone proxy env file (new layout)
+  if rm -f "$HOME/.config/vibe-code-tours/env.sh" 2>/dev/null; then
+    echo "  removed $HOME/.config/vibe-code-tours/env.sh"
+  fi
+  rmdir "$HOME/.config/vibe-code-tours" 2>/dev/null || true
+
+  # The proxy env vars may still be LIVE in the current shell. They override
+  # both settings.json AND the restored login, so the personal Claude won't work
+  # until they are cleared. unset only reaches the current shell when SOURCED.
+  VIBE_VARS="ANTHROPIC_BASE_URL ANTHROPIC_AUTH_TOKEN ANTHROPIC_API_KEY ANTHROPIC_MODEL ANTHROPIC_SMALL_FAST_MODEL CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY OPENAI_BASE_URL OPENAI_API_KEY OPENAI_MODEL VIBE_PROXY VIBE_KEY"
+  # shellcheck disable=SC2086
+  unset $VIBE_VARS 2>/dev/null || true
+  if [ "$SOURCED" = "1" ]; then
+    echo "OK Restored. Proxy env vars cleared in THIS shell — personal Claude login is active."
+    return 0
+  fi
+  echo ""
+  echo "WARN  Proxy env vars may still be active in your current terminal."
+  echo "   Open a NEW terminal, or re-run sourced to clear them in place:"
+  echo "       source api-setup.sh --restore"
+  echo "   ...or clear them now by hand:"
+  echo "       unset $VIBE_VARS"
   exit 0
 fi
 
@@ -173,12 +213,12 @@ done
 KEY="${1:-${VIBE_KEY:-}}"
 PROXY="${2:-${VIBE_PROXY:-}}"
 
-[ -n "$PROXY" ] || { echo "ERROR: proxy URL not set. ./api-setup.sh <KEY> <PROXY_URL>" >&2; exit 1; }
-case "$PROXY" in https://*) : ;; *) echo "ERROR: PROXY must start https://" >&2; exit 1;; esac
+[ -n "$PROXY" ] || { echo "ERROR: proxy URL not set. ./api-setup.sh <KEY> <PROXY_URL>" >&2; { [ "$SOURCED" = 1 ] && return 1 || exit 1; }; }
+case "$PROXY" in https://*) : ;; *) echo "ERROR: PROXY must start https://" >&2; { [ "$SOURCED" = 1 ] && return 1 || exit 1; };; esac
 PROXY="${PROXY%/}"; PROXY="${PROXY%/v1}"   # strip trailing slash + accidental /v1
 
 if [ -z "$KEY" ]; then printf "Paste your key (sk-...): "; read -r KEY; fi
-case "$KEY" in sk-*) : ;; *) echo "ERROR: key must start sk-" >&2; exit 1;; esac
+case "$KEY" in sk-*) : ;; *) echo "ERROR: key must start sk-" >&2; { [ "$SOURCED" = 1 ] && return 1 || exit 1; };; esac
 
 # ---------- locate + back up the Claude install ----------
 detect_claude
@@ -205,11 +245,11 @@ if have node; then
     j.env=Object.assign({},j.env,{
       ANTHROPIC_BASE_URL:process.env.VIBE_PROXY_V,
       ANTHROPIC_AUTH_TOKEN:process.env.VIBE_KEY_V,
-      ANTHROPIC_API_KEY:process.env.VIBE_KEY_V,
       ANTHROPIC_MODEL:"mimo-v2.5-pro",
       ANTHROPIC_SMALL_FAST_MODEL:"mimo-v2.5",
       CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY:"1"
     });
+    delete j.env.ANTHROPIC_API_KEY;  // Bearer-only; avoids the auth-conflict warning + cleans stale installs
     fs.writeFileSync(f,JSON.stringify(j,null,2));
   ' "$SF"
   echo "Claude proxy config -> $SF (env block)"
@@ -219,25 +259,28 @@ else
   echo "      claude.exe needs node to apply. Install Node, re-run." >&2
 fi
 
-# 3. shell profile (Linux/macOS claude + opencode convenience)
+# 3. shell env file + a one-line hook in the profile.
+#    The proxy env lives in its OWN file so removal is trivial: delete the file
+#    (or run --restore). The profile only gets a single guarded `source` line,
+#    wrapped in markers so it is easy to find and strip.
 case "${SHELL##*/}" in
   zsh)  PROFILE="$HOME/.zshrc" ;;
   bash) PROFILE="$HOME/.bashrc" ;;
   *)    PROFILE="$HOME/.profile" ;;
 esac
 touch "$PROFILE"
-MS="# >>> vibe-code-tours >>>"; ME="# <<< vibe-code-tours <<<"
-if grep -q "$MS" "$PROFILE" 2>/dev/null; then
-  tmp=$(mktemp); sed "/$MS/,/$ME/d" "$PROFILE" > "$tmp" && mv "$tmp" "$PROFILE"
-fi
-cat >> "$PROFILE" <<EOF
-$MS
-# Vibe Code Tours LLM proxy
+VIBE_ENV_DIR="$HOME/.config/vibe-code-tours"; VIBE_ENV="$VIBE_ENV_DIR/env.sh"
+mkdir -p "$VIBE_ENV_DIR"
+# Only ANTHROPIC_AUTH_TOKEN is set (Bearer auth). Setting ANTHROPIC_API_KEY too
+# makes Claude Code warn "Auth conflict: both a token and an API key are set".
+cat > "$VIBE_ENV" <<EOF
+# Vibe Code Tours LLM proxy env — sourced from your shell profile.
+# Remove it all:  $SELF_CMD --restore
+# Or by hand: delete this file + the '# >>> vibe-code-tours >>>' line in your profile.
 export VIBE_PROXY="$PROXY"
-# Claude Code (Anthropic-compatible) — base has NO /v1
+# Claude Code (Anthropic-compatible) — base has NO /v1, Bearer auth via AUTH_TOKEN
 export ANTHROPIC_BASE_URL="\$VIBE_PROXY"
 export ANTHROPIC_AUTH_TOKEN="$KEY"
-export ANTHROPIC_API_KEY="$KEY"
 # force proxy models so Claude Code never requests claude-opus-* (403)
 export ANTHROPIC_MODEL="mimo-v2.5-pro"
 export ANTHROPIC_SMALL_FAST_MODEL="mimo-v2.5"
@@ -247,6 +290,16 @@ export CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY="1"
 export OPENAI_BASE_URL="\$VIBE_PROXY/v1"
 export OPENAI_API_KEY="$KEY"
 vibe-model() { export OPENAI_MODEL="\$1"; echo "model: \$1"; }
+EOF
+chmod 600 "$VIBE_ENV" 2>/dev/null || true
+echo "Proxy env file -> $VIBE_ENV"
+MS="# >>> vibe-code-tours >>>"; ME="# <<< vibe-code-tours <<<"
+if grep -q "$MS" "$PROFILE" 2>/dev/null; then
+  tmp=$(mktemp); sed "/$MS/,/$ME/d" "$PROFILE" > "$tmp" && mv "$tmp" "$PROFILE"
+fi
+cat >> "$PROFILE" <<EOF
+$MS
+[ -f "$VIBE_ENV" ] && . "$VIBE_ENV"
 $ME
 EOF
 
@@ -274,16 +327,17 @@ echo "opencode config -> $OC/opencode.json"
 
 # 5. live test (Anthropic /v1/messages — what Claude Code calls)
 echo ""; echo "Testing key ..."
-code=$(curl -s -o /tmp/vibe_t.json -w "%{http_code}" "$PROXY/v1/messages" \
+TBODY="$(mktemp 2>/dev/null || echo /tmp/vibe_t.$$.json)"
+code=$(curl -s -o "$TBODY" -w "%{http_code}" "$PROXY/v1/messages" \
   -H "x-api-key: $KEY" -H "anthropic-version: 2023-06-01" -H "Content-Type: application/json" \
   -d '{"model":"mimo-v2.5","max_tokens":10,"messages":[{"role":"user","content":"ok"}]}' || true)
 case "$code" in
   200) echo "OK Key works." ;;
-  401) echo "FAIL Key rejected (401)." >&2; exit 1 ;;
+  401) echo "FAIL Key rejected (401)." >&2; rm -f "$TBODY" 2>/dev/null || true; { [ "$SOURCED" = 1 ] && return 1 || exit 1; } ;;
   429) echo "WARN budget/rate cap (429) — key valid." ;;
-  *)   echo "WARN HTTP $code — see /tmp/vibe_t.json" ;;
+  *)   echo "WARN HTTP $code — see $TBODY" ;;
 esac
-rm -f /tmp/vibe_t.json 2>/dev/null || true
+rm -f "$TBODY" 2>/dev/null || true
 
 echo ""
 echo "Done."

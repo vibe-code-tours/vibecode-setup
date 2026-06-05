@@ -2,3 +2,6 @@
 vibe-key.env
 *.env
 !vibe-key.env.example
+
+# AI agent knowledge (lazy-loaded, not for publish)
+knowledge/
