@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Block the push if any tracked *.sh fails shellcheck (-S warning).
+# Enable in a fresh clone:  git config core.hooksPath .githooks
+# Override a single push:    git push --no-verify
+set -u
+
+if ! command -v shellcheck >/dev/null 2>&1; then
+  echo "pre-push: shellcheck not installed — skipping check (get it: https://www.shellcheck.net)" >&2
+  exit 0
+fi
+
+fail=0
+while IFS= read -r f; do
+  [ -f "$f" ] || continue
+  shellcheck -S warning "$f" || fail=1
+done < <(git ls-files '*.sh')
+
+if [ "$fail" -ne 0 ]; then
+  echo "" >&2
+  echo "pre-push BLOCKED: shellcheck warnings above. Fix them, or override with: git push --no-verify" >&2
+  exit 1
+fi
+exit 0
