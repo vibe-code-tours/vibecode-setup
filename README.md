@@ -222,7 +222,7 @@ Adds a Windows-claude conflict prompt if both WSL and Windows installs exist (re
 (`card-template.svg`) and converts it to PNG.
 
 **Post it in `#ch-0-intro` (Discord):** drag in the PNG from `~/.vibecode/doctor/`.
-An instructor reacts ✅ → the bot grants the `ch-0-done` role → `#ch-1` unlocks.
+An instructor reacts ✅ or 👏 → the bot grants the `ch-0-done` role → `#ch-1` unlocks.
 No PNG tool? Post the `.svg` or the plain `.txt` card instead, or tag `@instructor`
 to `/unlock @you ch-0` after fixing the issue.
 

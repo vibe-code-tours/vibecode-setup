@@ -16,7 +16,7 @@
 #   5. proxy probe (claude -p OR curl VIBE_PROXY)
 #
 # Chapter-specific:
-#   ch-0: SVG badge card → drop PNG in #ch-0-intro → instructor ✅ → ch-0-done
+#   ch-0: SVG badge card → drop PNG in #ch-0-intro → instructor ✅/👏 → ch-0-done
 #   ch-1: +profile repo +PR check → posts gist → submit via /ch1 <gist-url>
 #
 # Flags:
@@ -402,7 +402,7 @@ TPL
   echo "  text:  $TXT  (copy/paste fallback)"
   echo "  json:  $JSON"
   echo
-  echo "  Wait for instructor ✅ → ch-0-done role → #ch-1 unlocks."
+  echo "  Wait for instructor ✅/👏 → ch-0-done role → #ch-1 unlocks."
 
 elif [ "$CHAPTER" = "ch-1" ]; then
   ch1_fail=0
@@ -445,7 +445,7 @@ elif [ "$CHAPTER" = "ch-1" ]; then
     echo "  gh not authed — manual gist: gh gist create --public $MD"
   fi
 else
-  warn "chapter $CHAPTER has no checker yet. Post evidence in #${CHAPTER} → instructor ✅."
+  warn "chapter $CHAPTER has no checker yet. Post evidence in #${CHAPTER} → instructor ✅/👏."
 fi
 
 # ---------- 9. recovery on proxy fail ----------
