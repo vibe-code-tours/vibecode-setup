@@ -50,6 +50,40 @@ Installs Node, Python, git, gh, Claude Code, opencode. Idempotent — safe to re
 > writes the proxy config into that install's `.claude/settings.json` — your
 > same `claude` command just works (no split-brain second login).
 
+### Log in to GitHub (`gh auth`)
+
+The script above installs `gh`, but you must log in once. Chapter 1+ homework
+needs it — profile-repo check, website PR, and gist posting all go through `gh`.
+
+```bash
+gh auth login
+```
+
+Answer the prompts:
+
+- **GitHub.com** (not Enterprise)
+- **HTTPS** protocol
+- **Yes** — authenticate Git with your GitHub credentials
+- **Login with a web browser** → copy the one-time code, press Enter, paste it in the browser
+
+> **No browser (headless WSL / SSH)?** Choose **Paste an authentication token** instead.
+> Make one at https://github.com/settings/tokens (classic) with **`repo`**, **`read:org`**,
+> and **`gist`** scopes, then paste it. (`gist` is required to post your Chapter 1 report.)
+
+Verify:
+
+```bash
+gh auth status                 # Logged in to github.com as <you>
+gh api user --jq .login        # prints your username
+```
+
+The token needs **`repo`** (read PRs) and **`gist`** (post the ch-1 report) scopes.
+If `doctor.sh` warns about scope, or `gh gist create` fails, refresh:
+
+```bash
+gh auth refresh -s repo,read:org,gist
+```
+
 ---
 
 ## 1. Configure the proxy key

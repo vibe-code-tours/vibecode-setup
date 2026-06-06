@@ -8,9 +8,9 @@
 #   bash student-setup.sh
 #
 # Idempotent — safe to re-run. Installs: nvm+Node 22 LTS, uv+Python 3.12
-# (project pin via .python-version), git, Claude Code, opencode CLI. Then verifies.
-# System Python 3.12-3.14 all accepted by verify.
-# git, Claude Code. Then verifies everything. No repo clone required.
+# (project pin via .python-version), git, GitHub CLI (gh), Claude Code,
+# opencode CLI. Then verifies. System Python 3.12-3.14 all accepted by verify.
+# No repo clone required.
 #
 # WSL note: if you ALREADY have Claude Code installed on native Windows, this
 # script detects it (claude.exe surfaced on the WSL PATH) and does NOT install a
@@ -49,7 +49,8 @@ APT=0; [ "$OS" = "linux" ] && have apt && APT=1
 # #setup-help when something breaks. No secrets here.
 diag() {
   rc=$?
-  distro="?"; [ -r /etc/os-release ] && distro="$( . /etc/os-release 2>/dev/null; echo "${PRETTY_NAME:-?}" )"
+  distro="$(grep -E '^PRETTY_NAME=' /etc/os-release 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"')"
+  [ -z "$distro" ] && distro="?"
   cb="$(command -v claude 2>/dev/null || true)"
   printf '\n\033[1;36m──────── setup debug (copy/paste into #setup-help) ────────\033[0m\n'
   [ "$rc" -eq 0 ] && echo "result  : SUCCESS" || echo "result  : FAILED (exit $rc)"
@@ -64,6 +65,7 @@ diag() {
   echo "python  : $(python3 --version 2>/dev/null || echo -)"
   echo "uv      : $(uv --version 2>/dev/null || echo -)"
   echo "git     : $(git --version 2>/dev/null || echo -)"
+  echo "gh      : $(gh --version 2>/dev/null | head -1 || echo -)"
   echo "claude  : $(claude --version 2>/dev/null | head -1 || echo -)${cb:+  [$cb]}"
   echo "opencode: $(opencode --version 2>/dev/null | head -1 || echo -)"
   printf '\033[1;36m───────────────────────────────────────────────────────────\033[0m\n'
@@ -71,7 +73,7 @@ diag() {
 trap diag EXIT
 
 # ---------- 1. Node via nvm ----------
-say "1/5  Node.js (nvm + Node 22 LTS)"
+say "1/6  Node.js (nvm + Node 22 LTS)"
 export NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
 if [ ! -s "$NVM_DIR/nvm.sh" ]; then
   curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash && ok "nvm installed"
@@ -83,6 +85,7 @@ fi
 # vars when a Node version is already installed), which would abort here.
 # Disable nounset around sourcing + nvm calls, then restore it.
 set +u
+# shellcheck source=/dev/null
 [ -s "$NVM_DIR/nvm.sh" ] && . "$NVM_DIR/nvm.sh"
 if have nvm; then
   nvm install $NODE_TRACK >/dev/null 2>&1 && nvm use $NODE_TRACK >/dev/null 2>&1
@@ -94,7 +97,7 @@ fi
 set -u
 
 # ---------- 2. Python via uv ----------
-say "2/5  Python (uv + Python $PY_VER)"
+say "2/6  Python (uv + Python $PY_VER)"
 if ! have uv; then
   curl -LsSf https://astral.sh/uv/install.sh | sh
   export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
@@ -110,7 +113,7 @@ else
 fi
 
 # ---------- 3. Git ----------
-say "3/5  Git"
+say "3/6  Git"
 if ! have git; then
   if [ "$APT" = 1 ]; then sudo apt update -y && sudo apt install -y git && ok "git installed"
   elif [ "$OS" = "macos" ]; then
@@ -121,7 +124,42 @@ else
   skip "git $(git --version | awk '{print $3}')"
 fi
 
-# ---------- 4. Claude Code ----------
+# ---------- 4. GitHub CLI (gh) ----------
+# doctor.sh + Chapter 1 homework need gh (>= 2.40) for auth, PR checks, gist posting.
+# Linux: official GitHub apt repo (Ubuntu's stock gh is often too old).
+# macOS: brew. Fallback (no apt / blocked region): webi -> latest to ~/.local/bin.
+say "4/6  GitHub CLI (gh)"
+if ! have gh; then
+  installed=0
+  if [ "$OS" = "macos" ] && have brew; then
+    brew install gh >/dev/null 2>&1 && { hash -r 2>/dev/null || true; have gh && { ok "gh installed (brew)"; installed=1; }; }
+  elif [ "$APT" = 1 ]; then
+    if sudo mkdir -p -m 755 /etc/apt/keyrings \
+       && curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | sudo tee /etc/apt/keyrings/githubcli-archive-keyring.gpg >/dev/null \
+       && sudo chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg \
+       && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | sudo tee /etc/apt/sources.list.d/github-cli.list >/dev/null \
+       && sudo apt update -y >/dev/null 2>&1 && sudo apt install -y gh >/dev/null 2>&1; then
+      hash -r 2>/dev/null || true
+      have gh && { ok "gh installed (apt)"; installed=1; }
+    fi
+  fi
+  # Fallback: webi (no sudo, latest, works in apt-less / blocked setups)
+  if [ "$installed" = 0 ]; then
+    if curl -sS https://webi.sh/gh 2>/dev/null | sh >/dev/null 2>&1; then
+      export PATH="$HOME/.local/bin:$PATH"
+      hash -r 2>/dev/null || true
+      have gh && { ok "gh installed (webi)"; installed=1; }
+    fi
+  fi
+  if [ "$installed" = 0 ]; then
+    warn "gh install failed. Manual: https://github.com/cli/cli#installation"
+    warn "Needed for Chapter 1 (gh auth login, profile PR + gist)."
+  fi
+else
+  skip "gh $(gh --version 2>/dev/null | head -1 | awk '{print $3}')"
+fi
+
+# ---------- 5. Claude Code ----------
 # Two install paths: official installer (curl) first, npm fallback for regions
 # where claude.ai is blocked (Myanmar, etc — npm registry is not geo-restricted).
 #
@@ -129,7 +167,7 @@ fi
 # (path under /mnt/), we do NOT install a Linux copy. A second install would
 # cause a split-brain (two configs, two logins). api-setup.sh configures the
 # existing Windows install instead.
-say "4/5  Claude Code"
+say "5/6  Claude Code"
 CLAUDE_BIN="$(command -v claude 2>/dev/null || true)"
 case "$CLAUDE_BIN" in
   /mnt/*)
@@ -172,10 +210,10 @@ case "$CLAUDE_BIN" in
     ;;
 esac
 
-# ---------- 5. opencode CLI (open-source agent CLI) ----------
+# ---------- 6. opencode CLI (open-source agent CLI) ----------
 # Default install alongside Claude Code. Path A = official installer, Path B = npm.
 # Works in blocked regions where claude.ai is unreachable (npm registry is not geo-blocked).
-say "5/5  opencode CLI"
+say "6/6  opencode CLI"
 if ! have opencode; then
   installed=0
   if curl -fsSL https://opencode.ai/install -o /tmp/_opencode_install.sh 2>/dev/null \
@@ -217,6 +255,7 @@ check "Python"      "python3 --version" "^Python 3\.(12|13|14)"
 check "uv"          "uv --version"     "^uv 0\."
 check "Claude Code" "claude --version" "^[2-9]\."
 check "git"         "git --version"    "git version 2\.([3-9][0-9]|[1-9][0-9]{2})"
+check "gh"          "gh --version"     "gh version (2\.[4-9][0-9]|[3-9])"
 check "opencode"    "opencode --version" "^[0-9]"
 
 say "Result"

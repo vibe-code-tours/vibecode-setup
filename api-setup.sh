@@ -48,8 +48,10 @@ esac
 # #setup-help. Key + proxy URL are intentionally hidden — shown only as set/unset.
 diag() {
   rc=$?
-  distro="?"; [ -r /etc/os-release ] && distro="$( . /etc/os-release 2>/dev/null; echo "${PRETTY_NAME:-?}" )"
-  iswsl=no; grep -qiE "microsoft|wsl" /proc/version 2>/dev/null && iswsl=yes || true
+  distro="$(grep -E '^PRETTY_NAME=' /etc/os-release 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"')"
+  [ -z "$distro" ] && distro="?"
+  iswsl=no
+  if grep -qiE "microsoft|wsl" /proc/version 2>/dev/null; then iswsl=yes; fi
   printf '\n\033[1;36m──────── api-setup debug (paste into #setup-help) ────────\033[0m\n'
   [ "$rc" -eq 0 ] && echo "result    : SUCCESS" || echo "result    : FAILED (exit $rc)"
   echo "date      : $(date -u +%FT%TZ 2>/dev/null || true)"
@@ -312,6 +314,7 @@ OC="$HOME/.config/opencode"; mkdir -p "$OC"
 MODELS_JSON="$(curl -s --max-time 10 "$PROXY/v1/models" -H "Authorization: Bearer $KEY" 2>/dev/null || true)"
 DISCOVERED=""
 if have node; then
+  # shellcheck disable=SC2016  # $-vars belong to the node script; passed via env, must not shell-expand
   DISCOVERED="$(OC_OUT="$OC/opencode.json" VIBE_PROXY_V="$PROXY" VIBE_KEY_V="$KEY" MODELS_JSON="$MODELS_JSON" node -e '
     const fs=require("fs");
     const proxy=process.env.VIBE_PROXY_V, key=process.env.VIBE_KEY_V;
