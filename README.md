@@ -247,14 +247,19 @@ It checks proxy API, `gh` auth, your profile repo, and your website PR. On **all
 pass** it posts a public gist and prints your submit command. On any ❌, fix the
 listed rows and re-run — the gist is not posted until everything passes.
 
-**3. Post it in your cohort channel (Discord or Telegram):**
+> **Every chapter works the same way:** `bash doctor.sh ch-N` → `/submit ch-N <gist>`
+> → mentor 👏. Chapter 1 adds the profile-repo + website-PR checks; later chapters
+> certify your environment and the mentor reviews the homework itself.
+
+**3. Submit in Discord:**
 
 ```
-/ch1 <gist-url>
+/submit ch-1 <gist-url>
 ```
 
-The bot re-verifies the profile repo + PR server-side and marks Chapter 1 done —
-no instructor react needed.
+The bot re-checks profile + PR, posts a report in `#ch-1`, and a **mentor approves
+with 👏** → you get the `ch-1-done` role. (`/ch1 <gist>` still works as an alias.)
+Telegram: run `/submit` in **Discord** — approval happens there.
 
 Useful flags:
 - `--no-post` — save the report markdown only, skip the gist post
