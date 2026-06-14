@@ -64,3 +64,37 @@ GitHub မှာ အရင်လုပ်ထားရမယ်:
 
 ⚠️ gh token မှာ `gist` scope လိုတယ် (browser login လုပ်ရင် ပါပြီးသား)။
 📖 လမ်းညွှန်: https://github.com/vibe-code-tours/vibecode-setup · ပြဿနာတက်ရင် #ch-1
+
+---
+
+## Claude Certifications — show your badges
+
+**English**
+
+🎓 **Earned Claude 101 or Claude Code 101?** Put them on your builder card.
+
+Add a `certs:` block to your profile (`src/content/builders/<you>.md`):
+```yaml
+certs:
+  claude_101: https://verify.skilljar.com/c/XXXXXXXX
+  claude_code_101: https://verify.skilljar.com/c/YYYYYYYY
+```
+We recommend the full verify URL (optional). Earned = amber badge, linked to
+your proof. ⚠️ Keys go **under** `certs:` — top level won't show.
+
+📖 Full guide (with pictures): https://github.com/vibe-code-tours/vibecode-setup/blob/main/CERTS.md · Stuck? #setup-help
+
+**မြန်မာ**
+
+🎓 **Claude 101 / Claude Code 101 ပြီးပြီလား?** သင့် builder card မှာ ပြပါ။
+
+Profile (`src/content/builders/<you>.md`) မှာ `certs:` block ထည့်ပါ:
+```yaml
+certs:
+  claude_101: https://verify.skilljar.com/c/XXXXXXXX
+  claude_code_101: https://verify.skilljar.com/c/YYYYYYYY
+```
+verify URL အပြည့် သုံးဖို့ အကြံပြုတယ် (optional)။ ရထားရင် amber badge ဖြစ်ပြီး proof
+ကို link ဖြစ်မယ်။ ⚠️ key တွေက `certs:` **အောက်မှာ** ထားရမယ် — top level မှာ မပေါ်ဘူး။
+
+📖 လမ်းညွှန် အပြည့် (ပုံနဲ့): https://github.com/vibe-code-tours/vibecode-setup/blob/main/CERTS.md · ပြဿနာတက်ရင် #setup-help

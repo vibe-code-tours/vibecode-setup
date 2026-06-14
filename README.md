@@ -421,3 +421,7 @@ curl -s "$VIBE_PROXY/key/info" \
 
 *Never paste your key or the proxy URL in a public repo, gist, or screenshot.
 Both come only from the cohort channel.*
+
+## Claude Certifications
+
+Earned Claude 101 / Claude Code 101? See **[CERTS.md](CERTS.md)** to add badges to your builder card.
