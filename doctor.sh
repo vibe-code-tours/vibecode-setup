@@ -38,7 +38,7 @@
 set -u
 
 # version stamp — bump on every doctor.sh change (helps users + mentors debug which build is running)
-DOCTOR_VERSION="2026-06-26a"
+DOCTOR_VERSION="2026-07-04a"
 
 # ---------- 0. self-update ----------
 # doctor.sh updates itself from main so chapter checks can change mid-cohort.
@@ -296,6 +296,10 @@ fi
 
 # ---------- 5. proxy / claude api ----------
 say "Proxy / Claude API"; hr
+# ch-2/ch-3 run on the ch-2 tier, whose proxy access is intentionally blocked.
+# The proxy probe still runs (informational) but must NOT gate submission.
+PROXY_GATED=1
+case "$CHAPTER" in ch-2|ch-3) PROXY_GATED=0 ;; esac
 # connectivity pre-check — separates "no internet" from "proxy/key is wrong"
 NET=down
 if curl -fsS --max-time 6 -o /dev/null "$DOCTOR_URL" 2>/dev/null \
@@ -338,6 +342,10 @@ if [ "$CL_OWN" = "ok" ] || [ "$CL_PROXY" = "ok" ]; then
   CL_API=ok
   if [ "$CL_OWN" = "ok" ]; then ok "own sub (claude -p): $CL_OWN_MSG"; else warn "own sub (claude -p): $CL_OWN_MSG"; fi
   if [ "$CL_PROXY" = "ok" ]; then ok "our key (proxy): $CL_PROXY_MSG"; else warn "our key (proxy): $CL_PROXY_MSG"; fi
+elif [ "$PROXY_GATED" = 0 ]; then
+  warn "proxy blocked at $CHAPTER tier (expected) — not gating this chapter"
+  warn "own sub (claude -p): $CL_OWN_MSG"
+  warn "our key (proxy): $CL_PROXY_MSG"
 else
   [ "$NET" = down ] && fail "ROOT CAUSE likely no internet — reconnect (wifi/VPN), then re-run"
   fail "own sub (claude -p): $CL_OWN_MSG"
@@ -1160,7 +1168,7 @@ else
   # any homework chapter (ch-1, ch-2, ...). Base: proxy + gh auth.
   # ch-1 also needs profile repo + website PR; others rely on mentor 👏 review.
   ch_fail=0
-  [ "$CL_API"  != "ok" ] && ch_fail=1
+  [ "$PROXY_GATED" = 1 ] && [ "$CL_API" != "ok" ] && ch_fail=1
   [ "$GH_AUTH" != "ok" ] && ch_fail=1
   if [ "$CHAPTER" = "ch-1" ]; then
     [ "$CH1_PROFILE"  != "ok" ] && ch_fail=1
@@ -1311,10 +1319,10 @@ fi
 echo
 say "Exit codes"; hr
 echo "  0 = all green    1 = hard fail (setup/homework incomplete)    2 = soft fail (proxy/API down)"
-if [ "$checks_pass" != "$checks_total" ] || [ "$CL_API" = "fail" ]; then
+if [ "$checks_pass" != "$checks_total" ] || { [ "$PROXY_GATED" = 1 ] && [ "$CL_API" = "fail" ]; }; then
   print_debug_bundle
 fi
-if [ "$CL_API" = "fail" ]; then
+if [ "$PROXY_GATED" = 1 ] && [ "$CL_API" = "fail" ]; then
   echo
   say "Proxy/API failed — recovery options:"; hr
   echo "  1. gemini  — free tier (gemini.google.com or 'gemini' CLI)"
