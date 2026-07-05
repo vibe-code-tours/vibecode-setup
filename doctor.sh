@@ -38,7 +38,7 @@
 set -u
 
 # version stamp — bump on every doctor.sh change (helps users + mentors debug which build is running)
-DOCTOR_VERSION="2026-07-04a"
+DOCTOR_VERSION="2026-07-05a"
 
 # ---------- 0. self-update ----------
 # doctor.sh updates itself from main so chapter checks can change mid-cohort.
@@ -466,7 +466,11 @@ if [ "$CHAPTER" = "ch-3" ]; then
       fi
 
       # 2. personal repo: owner check + distinct stargazers (excl. owner) for stars gate
-      CH3_REPO=$(printf '%s' "$CH3_REPO_URL" | sed -E 's#(git@|https?://)github.com[:/]##; s/#.*$//; s/\.git$//; s#/+$##')
+      # robust owner/repo: strip host, drop any path/query (/tree/main, ?tab=),
+      # keep first two segments, strip trailing .git
+      CH3_REPO=$(printf '%s' "$CH3_REPO_URL" \
+        | sed -E 's#(git@|https?://)github\.com[:/]##; s/[#?].*$//' \
+        | cut -d/ -f1,2 | sed -E 's/\.git$//')
       repo_owner=$(gh api "repos/$CH3_REPO" --jq '.owner.login' 2>/dev/null || true)
       if [ -z "$repo_owner" ]; then
         fail "personal repo not found: ${CH3_REPO:-none} (check personal_repo_url)"
@@ -477,13 +481,22 @@ if [ "$CHAPTER" = "ch-3" ]; then
         else
           fail "personal_repo_url owner @$repo_owner != you @$GH_USER — submit your own repo"
         fi
-        # distinct stargazers excluding the owner — one self-star does not count
-        CH3_STAR_COUNT=$(gh api --paginate "repos/$CH3_REPO/stargazers" --jq '.[].login' 2>/dev/null \
-          | tr '[:upper:]' '[:lower:]' | grep -vxF "$repo_owner_lc" | sort -u | grep -c . || true)
-        if [ "${CH3_STAR_COUNT:-0}" -ge "$CH3_MIN_STARS" ]; then
-          CH3_STARS=ok; ok "stars: $CH3_STAR_COUNT distinct, excl. you (>= $CH3_MIN_STARS)"
+        # distinct stargazers excluding the owner — one self-star does not count.
+        # Distinguish a fetch failure (throttle/offline) from a genuine 0: on failure
+        # soft-pass (the bot re-checks authoritatively at /submit) so a GitHub hiccup
+        # never falsely accuses a real repo of ghosting.
+        _stg=$(gh api --paginate "repos/$CH3_REPO/stargazers" --jq '.[].login' 2>/dev/null); _stg_rc=$?
+        if [ "$_stg_rc" -ne 0 ]; then
+          CH3_STARS=ok; CH3_STAR_COUNT="?"
+          warn "stars: couldn't reach GitHub (throttle/offline) — not counted against you; the bot verifies at /submit"
         else
-          fail "stars: $CH3_STAR_COUNT distinct (need >= $CH3_MIN_STARS — ask teammates to ⭐; your own star doesn't count)"
+          CH3_STAR_COUNT=$(printf '%s\n' "$_stg" \
+            | tr '[:upper:]' '[:lower:]' | grep -vxF "$repo_owner_lc" | sort -u | grep -c . || true)
+          if [ "${CH3_STAR_COUNT:-0}" -ge "$CH3_MIN_STARS" ]; then
+            CH3_STARS=ok; ok "stars: $CH3_STAR_COUNT distinct, excl. you (>= $CH3_MIN_STARS)"
+          else
+            fail "stars: $CH3_STAR_COUNT distinct (need >= $CH3_MIN_STARS — ask teammates to ⭐; your own star doesn't count)"
+          fi
         fi
 
         # 3. evidence: recursive tree of personal repo → .mcp/.claude + claimed paths
