@@ -39,7 +39,7 @@
 set -u
 
 # version stamp — bump on every doctor.sh change (helps users + mentors debug which build is running)
-DOCTOR_VERSION="2026-07-14a"
+DOCTOR_VERSION="2026-07-16a"
 
 # ---------- 0. self-update ----------
 # doctor.sh updates itself from main so chapter checks can change mid-cohort.
@@ -976,6 +976,7 @@ fi
 # Mirrors instructor scripts/check-ch7.mjs.
 CH7_REPORT=fail; CH7_AUTHOR=fail; CH7_DEMO=fail; CH7_MATRIX=fail; CH7_LIVE=fail
 CH7_ISSUE=fail; CH7_PR=fail; CH7_REVIEW=skip
+CH7_PEER=fail; CH7_PEER_COUNT=0; PF_MIN=3
 CH7_TEAM_REPO=""; CH7_DIR=""; CH7_REPO_URL=""; CH7_LIVE_URL=""; CH7_BACKUP=""; CH7_REPO=""
 CH7_REPORT_TMP="$OUTDIR/ch-7-report-fetched-$TS.md"
 if [ "$CHAPTER" = "ch-7" ]; then
@@ -1066,6 +1067,19 @@ if [ "$CHAPTER" = "ch-7" ]; then
       if [ -n "$review_ok" ]; then CH7_REVIEW=ok; ok "PR you reviewed linked"
       else warn "no PR you reviewed found — review a teammate's PR (soft)"; fi
     fi
+
+    # peer feedback — >=PF_MIN OPEN issues you authored across OTHER team repos.
+    # Repo list kept in parity with roster/team-repos.tsv + channels scripts/check-ch7.mjs.
+    PF_REPOS="vibe-code-tours/team-01-app vibe-code-tours/team-02-app pyone-cho/pwe vibe-code-tours/team-04-app vibe-code-tours/team-05-app vibe-code-tours/team-06-app vibecode-team7/ARGUS vibe-code-tours/team-08-app vibe-code-tours/team-09-app vibe-code-tours/team-10-app team11-hub-coder/personal-analytics SiThuTun-mdy/Dr-Note vibe-code-tours/team-13-app vibe-code-tours/team-14-app vibe-code-tours/team-15-app vibe-code-tours/team-16-app vibe-code-tours/team-17-app swan1792/Fraud_Awareness_Hub vibe-code-tours/team-19-app vibe-code-tours/team-20-app"
+    CH7_PEER_OWN=$(printf '%s' "$CH7_REPO" | tr '[:upper:]' '[:lower:]')
+    for r in $PF_REPOS; do
+      [ "$(printf '%s' "$r" | tr '[:upper:]' '[:lower:]')" = "$CH7_PEER_OWN" ] && continue
+      n=$(gh api "repos/$r/issues?state=open&creator=$GH_USER&per_page=100" --jq '[.[]|select(.pull_request==null)]|length' 2>/dev/null || echo 0)
+      case "$n" in ''|*[!0-9]*) n=0;; esac
+      CH7_PEER_COUNT=$((CH7_PEER_COUNT + n))
+    done
+    if [ "$CH7_PEER_COUNT" -ge "$PF_MIN" ]; then CH7_PEER=ok; ok "peer feedback: $CH7_PEER_COUNT open issue(s) authored on other teams (need $PF_MIN)"
+    else fail "peer feedback: only $CH7_PEER_COUNT/$PF_MIN — review other teams' demos and file issues"; fi
   fi
 fi
 
@@ -1103,7 +1117,7 @@ if [ "$CHAPTER" = "ch-6" ]; then
 fi
 CH7_JSON=""
 if [ "$CHAPTER" = "ch-7" ]; then
-  CH7_JSON="  \"ch7\": { \"team_repo\": \"$CH7_TEAM_REPO\", \"author\": \"$CH7_AUTHOR\", \"demo\": \"$CH7_DEMO\", \"matrix\": \"$CH7_MATRIX\", \"live\": \"$CH7_LIVE\", \"issue\": \"$CH7_ISSUE\", \"pr\": \"$CH7_PR\", \"review\": \"$CH7_REVIEW\" },
+  CH7_JSON="  \"ch7\": { \"team_repo\": \"$CH7_TEAM_REPO\", \"author\": \"$CH7_AUTHOR\", \"demo\": \"$CH7_DEMO\", \"matrix\": \"$CH7_MATRIX\", \"live\": \"$CH7_LIVE\", \"issue\": \"$CH7_ISSUE\", \"pr\": \"$CH7_PR\", \"review\": \"$CH7_REVIEW\", \"peer\": \"$CH7_PEER\", \"peer_count\": \"$CH7_PEER_COUNT\" },
 "
 fi
 cat > "$JSON" <<EOF
