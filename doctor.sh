@@ -12,7 +12,7 @@
 #   bash doctor.sh ch-4             # ch-4 homework (team-repo report + personal repo: live/download URL, LICENSE, >=3 screenshots, product-intro slides)
 #   bash doctor.sh ch-5             # ch-5 homework (team-repo report + personal repo: Skill + Subagent, tech-stack slides, one feedback file, live URL)
 #   bash doctor.sh ch-6             # ch-6 homework (team-repo report + personal repo: closed-issue links, LICENSE, README, analytics, >=3 screenshots, public live URL, gallery slides)
-#   bash doctor.sh ch-7             # ch-7 homework (team repo: DEMO.md + tool-matrix.md at root, public live URL, your closed issue + authored PR)
+#   bash doctor.sh ch-7             # ch-7 homework (peer feedback: >=3 OPEN issues you authored on OTHER teams' repos)
 #
 # Stages (all chapters):
 #   1. detect platform (mac | wsl | linux)
@@ -39,7 +39,7 @@
 set -u
 
 # version stamp — bump on every doctor.sh change (helps users + mentors debug which build is running)
-DOCTOR_VERSION="2026-07-16a"
+DOCTOR_VERSION="2026-07-25a"
 
 # ---------- 0. self-update ----------
 # doctor.sh updates itself from main so chapter checks can change mid-cohort.
@@ -136,7 +136,7 @@ print_debug_bundle() {
     ch-4) echo "ch4: report:${CH4_REPORT:-?} author:${CH4_AUTHOR:-?} repo:${CH4_OWNER:-?} license:${CH4_LICENSE:-?} live:${CH4_LIVE:-?} shots:${CH4_SHOTS:-?} slides:${CH4_SLIDES:-?}" ;;
     ch-5) echo "ch5: report:${CH5_REPORT:-?} author:${CH5_AUTHOR:-?} repo:${CH5_OWNER:-?} skill:${CH5_SKILL:-?} agent:${CH5_AGENT:-?} slides:${CH5_SLIDES:-?} feedback:${CH5_FEEDBACK:-?} live:${CH5_LIVE:-?}" ;;
     ch-6) echo "ch6: report:${CH6_REPORT:-?} author:${CH6_AUTHOR:-?} repo:${CH6_OWNER:-?} license:${CH6_LICENSE:-?} readme:${CH6_README:-?} shots:${CH6_SHOTS:-?} slides:${CH6_SLIDES:-?} issues:${CH6_ISSUES:-?} live:${CH6_LIVE:-?}" ;;
-    ch-7) echo "ch7: report:${CH7_REPORT:-?} author:${CH7_AUTHOR:-?} team:${CH7_TEAM_REPO:-?} demo:${CH7_DEMO:-?} matrix:${CH7_MATRIX:-?} live:${CH7_LIVE:-?} issue:${CH7_ISSUE:-?} pr:${CH7_PR:-?}" ;;
+    ch-7) echo "ch7: peer:${CH7_PEER:-?} count:${CH7_PEER_COUNT:-0} own:${CH7_OWN:-none}" ;;
   esac
   echo "score: ${checks_pass:-0}/${checks_total:-0}  json: ${JSON:-none}"
   echo '```'
@@ -971,113 +971,28 @@ EOF6
 fi
 
 # ---------- 6g. chapter 7 — team demo-ready sprint ----------
-# Submission: TEAM repo ch-7/<you>/report.md. Team repo has DEMO.md + tool-matrix.md at
-# root, a public live URL; your contribution = >=1 CLOSED issue + >=1 PR you authored.
+# ch-7 gate = PEER FEEDBACK ONLY: >=PF_MIN OPEN issues you authored across OTHER team
+# repos. Your own team (detected via collaborator membership) is excluded.
 # Mirrors instructor scripts/check-ch7.mjs.
-CH7_REPORT=fail; CH7_AUTHOR=fail; CH7_DEMO=fail; CH7_MATRIX=fail; CH7_LIVE=fail
-CH7_ISSUE=fail; CH7_PR=fail; CH7_REVIEW=skip
-CH7_PEER=fail; CH7_PEER_COUNT=0; PF_MIN=3
-CH7_TEAM_REPO=""; CH7_DIR=""; CH7_REPO_URL=""; CH7_LIVE_URL=""; CH7_BACKUP=""; CH7_REPO=""
-CH7_REPORT_TMP="$OUTDIR/ch-7-report-fetched-$TS.md"
+CH7_PEER=fail; CH7_PEER_COUNT=0; CH7_OWN=""; PF_MIN=3
 if [ "$CHAPTER" = "ch-7" ]; then
-  say "Chapter 7 — team demo-ready sprint"; hr
+  say "Chapter 7 — peer feedback"; hr
   if [ -z "$GH_USER" ]; then
     fail "skipping ch-7 checks — gh not authed (run: gh auth login)"
   else
-    TEAM_REPOS=$(gh api --paginate "orgs/$GH_ORG/repos?per_page=100" --jq '.[].name' 2>/dev/null | grep -E '^team-[0-9]+$' || true)
-    for t in $TEAM_REPOS; do
-      d=$(gh api "repos/$GH_ORG/$t/contents/ch-7" --jq '.[].name' 2>/dev/null | grep -ixF "$GH_USER" | head -1 || true)
-      if [ -n "$d" ] && gh api "repos/$GH_ORG/$t/contents/ch-7/$d/report.md" >/dev/null 2>&1; then
-        CH7_TEAM_REPO="$t"; CH7_DIR="$d"; break
-      fi
-    done
-    if [ -z "$CH7_TEAM_REPO" ]; then
-      fail "no ch-7/$GH_USER/report.md in any team repo — copy ch-7/_TEMPLATE.md to ch-7/$GH_USER_LC/report.md, fill it, push"
-    elif gh api "repos/$GH_ORG/$CH7_TEAM_REPO/contents/ch-7/$CH7_DIR/report.md" \
-           -H "Accept: application/vnd.github.raw" > "$CH7_REPORT_TMP" 2>/dev/null \
-         && [ -s "$CH7_REPORT_TMP" ]; then
-      CH7_REPORT=ok; ok "report: $CH7_TEAM_REPO/ch-7/$CH7_DIR/report.md"
-    else
-      fail "could not fetch ch-7/$CH7_DIR/report.md from $CH7_TEAM_REPO"
-    fi
-
-    if [ "$CH7_REPORT" = ok ]; then
-      tr -d '\r' < "$CH7_REPORT_TMP" > "$CH7_REPORT_TMP.n" && mv "$CH7_REPORT_TMP.n" "$CH7_REPORT_TMP"
-      get7() {
-        awk -v k="$1" '{ line=$0; sub(/^[[:space:]]*[-*[:space:]]*/,"",line); low=tolower(line)
-          if (match(low,"^" k "[[:space:]]*:")) { v=substr(line,RLENGTH+1); sub(/^[[:space:]*]*/,"",v); sub(/[[:space:]*]+$/,"",v); print v; exit } }' "$CH7_REPORT_TMP"
-      }
-      is_ph() { case "$1" in ""|*"<"*|*">"*) return 0;; *) return 1;; esac; }
-      CH7_REPO_URL=$(get7 'team[ \t]*repo[ \t]*url')
-      CH7_LIVE_URL=$(get7 'live[^:]*')
-      CH7_BACKUP=$(get7 'backup[^:]*')
-
-      rep_author=$(gh api "repos/$GH_ORG/$CH7_TEAM_REPO/commits?path=ch-7/$CH7_DIR/report.md&per_page=1" --jq '.[0].author.login // ""' 2>/dev/null | tr '[:upper:]' '[:lower:]')
-      if [ -z "$rep_author" ]; then CH7_AUTHOR=ok; warn "could not verify report.md commit author — instructor will check"
-      elif [ "$rep_author" = "$GH_USER_LC" ]; then CH7_AUTHOR=ok; ok "report committed by you (@$rep_author)"
-      else fail "report.md last committed by @$rep_author, not you (@$GH_USER) — push your own report"; fi
-
-      # public live URL
-      if is_ph "$CH7_LIVE_URL"; then fail "Live URL empty/placeholder — deploy public and paste the link"
-      else
-        CH7_LIVE=ok; ok "live url: $CH7_LIVE_URL"
-        if have curl; then
-          code=$(curl -A 'vibe-doctor' -m 12 -s -o /dev/null -w '%{http_code}' -L "$CH7_LIVE_URL" 2>/dev/null || true)
-          case "$code" in 2??|3??) ok "live url reachable (HTTP $code)";; 000|"") warn "live url not reachable from here — instructor will open it";; *) warn "live url returned HTTP $code";; esac
-        fi
-      fi
-
-      # backup recording — soft
-      if is_ph "$CH7_BACKUP"; then warn "Backup recording URL empty — record a fallback (BACKUP-RECORDING-CHECKLIST.md)"
-      else ok "backup recording: $CH7_BACKUP"; fi
-
-      # team repo tree — DEMO.md + tool-matrix.md at root
-      CH7_REPO=$(printf '%s' "$CH7_REPO_URL" | sed -E 's#(git@|https?://)github.com[:/]##; s/#.*$//; s/\.git$//; s#/+$##')
-      if is_ph "$CH7_REPO_URL"; then fail "Team repo URL empty/placeholder"
-      else
-        if [ "$(gh api "repos/$CH7_REPO/git/trees/HEAD?recursive=1" --jq '.truncated' 2>/dev/null)" = "true" ]; then
-          warn "repo tree too large — GitHub truncated it; checks may be incomplete"
-        fi
-        TREE_PATHS=$(gh api "repos/$CH7_REPO/git/trees/HEAD?recursive=1" --jq '.tree[]|select(.type=="blob")|.path' 2>/dev/null || true)
-        if printf '%s\n' "$TREE_PATHS" | grep -qiE '^demo\.md$'; then CH7_DEMO=ok; ok "DEMO.md at repo root"
-        else fail "no DEMO.md at team-repo root"; fi
-        if printf '%s\n' "$TREE_PATHS" | grep -qiE '^tool-matrix\.md$'; then CH7_MATRIX=ok; ok "tool-matrix.md at repo root"
-        else fail "no tool-matrix.md at team-repo root — commit the Block F matrix"; fi
-      fi
-
-      # per-member: >=1 CLOSED issue link + >=1 PR authored by you (>=1 reviewed = soft)
-      issue_ok=""
-      for u in $(grep -oiE 'https://github\.com/[^/]+/[^/]+/issues/[0-9]+' "$CH7_REPORT_TMP" | sort -u); do
-        rpath="${u#https://github.com/}"
-        st=$(gh api "repos/${rpath%/issues/*}/issues/${u##*/}" --jq '.state // ""' 2>/dev/null || true)
-        if [ "$st" = "closed" ]; then issue_ok=1; break; fi
-      done
-      if [ -n "$issue_ok" ]; then CH7_ISSUE=ok; ok "closed issue linked"
-      else fail "no CLOSED issue link in report — close a team issue and link it"; fi
-
-      pr_ok=""; review_ok=""
-      for u in $(grep -oiE 'https://github\.com/[^/]+/[^/]+/pull/[0-9]+' "$CH7_REPORT_TMP" | sort -u); do
-        rpath="${u#https://github.com/}"; repo="${rpath%/pull/*}"; num="${u##*/}"
-        au=$(gh api "repos/$repo/pulls/$num" --jq '.user.login // ""' 2>/dev/null | tr '[:upper:]' '[:lower:]')
-        [ "$au" = "$GH_USER_LC" ] && pr_ok=1
-        if gh api "repos/$repo/pulls/$num/reviews" --jq '.[].user.login' 2>/dev/null | tr '[:upper:]' '[:lower:]' | grep -qxF "$GH_USER_LC"; then review_ok=1; fi
-      done
-      if [ -n "$pr_ok" ]; then CH7_PR=ok; ok "PR you authored linked"
-      else fail "no PR authored by you (@$GH_USER) linked — open one and link it"; fi
-      if [ -n "$review_ok" ]; then CH7_REVIEW=ok; ok "PR you reviewed linked"
-      else warn "no PR you reviewed found — review a teammate's PR (soft)"; fi
-    fi
-
-    # peer feedback — >=PF_MIN OPEN issues you authored across OTHER team repos.
     # Repo list kept in parity with roster/team-repos.tsv + channels scripts/check-ch7.mjs.
     PF_REPOS="vibe-code-tours/team-01-app vibe-code-tours/team-02-app pyone-cho/pwe vibe-code-tours/team-04-app vibe-code-tours/team-05-app vibe-code-tours/team-06-app vibecode-team7/ARGUS vibe-code-tours/team-08-app vibe-code-tours/team-09-app vibe-code-tours/team-10-app team11-hub-coder/personal-analytics SiThuTun-mdy/Dr-Note vibe-code-tours/team-13-app vibe-code-tours/team-14-app vibe-code-tours/team-15-app vibe-code-tours/team-16-app vibe-code-tours/team-17-app swan1792/Fraud_Awareness_Hub vibe-code-tours/team-19-app vibe-code-tours/team-20-app"
-    CH7_PEER_OWN=$(printf '%s' "$CH7_REPO" | tr '[:upper:]' '[:lower:]')
     for r in $PF_REPOS; do
-      [ "$(printf '%s' "$r" | tr '[:upper:]' '[:lower:]')" = "$CH7_PEER_OWN" ] && continue
+      # own team? collaborator membership => skip. gh api exits 0 on 2xx (204=collaborator),
+      # non-zero on 403/404 (no push access / not a collaborator) => counted as "other".
+      if gh api "repos/$r/collaborators/$GH_USER" >/dev/null 2>&1; then
+        CH7_OWN="${CH7_OWN:+$CH7_OWN }$r"; continue
+      fi
       n=$(gh api "repos/$r/issues?state=open&creator=$GH_USER&per_page=100" --jq '[.[]|select(.pull_request==null)]|length' 2>/dev/null || echo 0)
       case "$n" in ''|*[!0-9]*) n=0;; esac
       CH7_PEER_COUNT=$((CH7_PEER_COUNT + n))
     done
+    [ -n "$CH7_OWN" ] && ok "own team (excluded from peer count): $CH7_OWN"
     if [ "$CH7_PEER_COUNT" -ge "$PF_MIN" ]; then CH7_PEER=ok; ok "peer feedback: $CH7_PEER_COUNT open issue(s) authored on other teams (need $PF_MIN)"
     else fail "peer feedback: only $CH7_PEER_COUNT/$PF_MIN — review other teams' demos and file issues"; fi
   fi
@@ -1117,7 +1032,7 @@ if [ "$CHAPTER" = "ch-6" ]; then
 fi
 CH7_JSON=""
 if [ "$CHAPTER" = "ch-7" ]; then
-  CH7_JSON="  \"ch7\": { \"team_repo\": \"$CH7_TEAM_REPO\", \"author\": \"$CH7_AUTHOR\", \"demo\": \"$CH7_DEMO\", \"matrix\": \"$CH7_MATRIX\", \"live\": \"$CH7_LIVE\", \"issue\": \"$CH7_ISSUE\", \"pr\": \"$CH7_PR\", \"review\": \"$CH7_REVIEW\", \"peer\": \"$CH7_PEER\", \"peer_count\": \"$CH7_PEER_COUNT\" },
+  CH7_JSON="  \"ch7\": { \"peer\": \"$CH7_PEER\", \"peer_count\": \"$CH7_PEER_COUNT\", \"own\": \"$CH7_OWN\" },
 "
 fi
 cat > "$JSON" <<EOF
@@ -1330,6 +1245,9 @@ else
       [ "$v" != "ok" ] && ch_fail=1
     done
   fi
+  if [ "$CHAPTER" = "ch-7" ]; then
+    [ "$CH7_PEER" != "ok" ] && ch_fail=1
+  fi
   {
     echo "# ${CHAPTER} check — $(date -u '+%Y-%m-%d %H:%M UTC')"
     echo
@@ -1379,6 +1297,11 @@ else
       echo "- screenshots: $CH6_SHOT_COUNT in repo (need >= $CH6_MIN_SHOTS: $CH6_SHOTS)"
       echo "- slides: $CH6_SLIDES ($CH6_SLIDES_PATH)"
       echo "- live url: $CH6_LIVE ($CH6_LIVE_URL)"
+    fi
+    if [ "$CHAPTER" = "ch-7" ]; then
+      CH7_OWN_DISP="${CH7_OWN:-none}"
+      echo "- own team(s): $CH7_OWN_DISP"
+      echo "- peer issues authored: $CH7_PEER_COUNT (need >= $PF_MIN: $CH7_PEER)"
     fi
     echo
     echo "---"
