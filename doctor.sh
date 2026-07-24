@@ -39,7 +39,7 @@
 set -u
 
 # version stamp — bump on every doctor.sh change (helps users + mentors debug which build is running)
-DOCTOR_VERSION="2026-07-25b"
+DOCTOR_VERSION="2026-07-25c"
 
 # ---------- 0. self-update ----------
 # doctor.sh updates itself from main so chapter checks can change mid-cohort.
@@ -974,7 +974,7 @@ fi
 # ch-7 gate = PEER FEEDBACK ONLY: >=PF_MIN issues you authored (open or closed) across OTHER team
 # repos. Your own team (detected via collaborator membership) is excluded.
 # Mirrors instructor scripts/check-ch7.mjs.
-CH7_PEER=fail; CH7_PEER_COUNT=0; CH7_OWN=""; PF_MIN=3
+CH7_PEER=fail; CH7_PEER_COUNT=0; CH7_OWN=""; CH7_PEER_URLS=""; PF_MIN=3
 if [ "$CHAPTER" = "ch-7" ]; then
   say "Chapter 7 — peer feedback"; hr
   if [ -z "$GH_USER" ]; then
@@ -988,13 +988,20 @@ if [ "$CHAPTER" = "ch-7" ]; then
       if gh api "repos/$r/collaborators/$GH_USER" >/dev/null 2>&1; then
         CH7_OWN="${CH7_OWN:+$CH7_OWN }$r"; continue
       fi
-      n=$(gh api "repos/$r/issues?state=all&creator=$GH_USER&per_page=100" --jq '[.[]|select(.pull_request==null)]|length' 2>/dev/null || echo 0)
-      case "$n" in ''|*[!0-9]*) n=0;; esac
+      urls=$(gh api "repos/$r/issues?state=all&creator=$GH_USER&per_page=100" --jq '.[]|select(.pull_request==null)|"\(.html_url) [\(.state)]"' 2>/dev/null || true)
+      [ -z "$urls" ] && continue
+      n=$(printf '%s\n' "$urls" | grep -c .)
       CH7_PEER_COUNT=$((CH7_PEER_COUNT + n))
+      CH7_PEER_URLS="${CH7_PEER_URLS:+$CH7_PEER_URLS
+}$urls"
     done
     [ -n "$CH7_OWN" ] && ok "own team (excluded from peer count): $CH7_OWN"
     if [ "$CH7_PEER_COUNT" -ge "$PF_MIN" ]; then CH7_PEER=ok; ok "peer feedback: $CH7_PEER_COUNT issue(s) authored on other teams, open or closed (need $PF_MIN)"
     else fail "peer feedback: only $CH7_PEER_COUNT/$PF_MIN — review other teams' demos and file issues"; fi
+    if [ -n "$CH7_PEER_URLS" ]; then
+      say "  issues you filed:"
+      printf '%s\n' "$CH7_PEER_URLS" | while IFS= read -r u; do [ -n "$u" ] && echo "    - $u"; done
+    fi
   fi
 fi
 
@@ -1302,6 +1309,9 @@ else
       CH7_OWN_DISP="${CH7_OWN:-none}"
       echo "- own team(s): $CH7_OWN_DISP"
       echo "- peer issues authored: $CH7_PEER_COUNT (need >= $PF_MIN: $CH7_PEER)"
+      if [ -n "$CH7_PEER_URLS" ]; then
+        printf '%s\n' "$CH7_PEER_URLS" | while IFS= read -r u; do [ -n "$u" ] && echo "  - $u"; done
+      fi
     fi
     echo
     echo "---"
