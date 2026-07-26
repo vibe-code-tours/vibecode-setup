@@ -39,7 +39,7 @@
 set -u
 
 # version stamp — bump on every doctor.sh change (helps users + mentors debug which build is running)
-DOCTOR_VERSION="2026-07-25c"
+DOCTOR_VERSION="2026-07-26a"
 
 # ---------- 0. self-update ----------
 # doctor.sh updates itself from main so chapter checks can change mid-cohort.
@@ -300,7 +300,14 @@ fi
 say "Proxy / Claude API"; hr
 # ch-2/ch-3 run on the ch-2 tier, whose proxy access is intentionally blocked.
 # The proxy probe still runs (informational) but must NOT gate submission.
-PROXY_GATED=1
+#
+# TEMPORARY (2026-07-26): gated OFF for EVERY chapter — both the Claude sub and the
+# proxy API check are informational, neither blocks submission. Keys now carry 5h and
+# weekly spend windows, so a correctly-configured student can be rate-limited at any
+# moment; gating homework on that would fail them for a budget state rather than a
+# setup fault. Access also varies by chapter band now, so "no proxy" is normal for some.
+# REVERT: set PROXY_GATED=1 and keep the ch-2|ch-3 exemption below.
+PROXY_GATED=0
 case "$CHAPTER" in ch-2|ch-3) PROXY_GATED=0 ;; esac
 # connectivity pre-check — separates "no internet" from "proxy/key is wrong"
 NET=down
@@ -333,11 +340,18 @@ if [ -n "$VIBE_PROXY" ] && [ -n "$VIBE_KEY" ]; then
     -H "Content-Type: application/json" \
     -d '{"model":"mimo-v2.5","messages":[{"role":"user","content":"say ok"}],"max_tokens":5}' 2>/dev/null)
   rm -f "$_api_cfg"
-  if [ "$PROXY_HTTP" = "200" ]; then
-    CL_PROXY=ok; CL_PROXY_MSG="HTTP 200"
-  else
-    CL_PROXY_MSG="HTTP ${PROXY_HTTP:-no-response} (check VIBE_PROXY/VIBE_KEY)"
-  fi
+  case "$PROXY_HTTP" in
+    200)
+      CL_PROXY=ok; CL_PROXY_MSG="HTTP 200" ;;
+    429)
+      # 429 means the key AUTHENTICATED and was then refused on a spend window.
+      # That proves the setup is correct — reporting it as a failure sends students
+      # to re-run api-setup.sh over what is really just a full 5h/weekly budget.
+      CL_PROXY=ok
+      CL_PROXY_MSG="HTTP 429 — key is fine, spend window full (5h or weekly); retry later" ;;
+    *)
+      CL_PROXY_MSG="HTTP ${PROXY_HTTP:-no-response} (check VIBE_PROXY/VIBE_KEY)" ;;
+  esac
 fi
 # verdict: either path is enough
 if [ "$CL_OWN" = "ok" ] || [ "$CL_PROXY" = "ok" ]; then
@@ -345,7 +359,11 @@ if [ "$CL_OWN" = "ok" ] || [ "$CL_PROXY" = "ok" ]; then
   if [ "$CL_OWN" = "ok" ]; then ok "own sub (claude -p): $CL_OWN_MSG"; else warn "own sub (claude -p): $CL_OWN_MSG"; fi
   if [ "$CL_PROXY" = "ok" ]; then ok "our key (proxy): $CL_PROXY_MSG"; else warn "our key (proxy): $CL_PROXY_MSG"; fi
 elif [ "$PROXY_GATED" = 0 ]; then
-  warn "proxy blocked at $CHAPTER tier (expected) — not gating this chapter"
+  case "$CHAPTER" in
+    ch-2|ch-3) warn "proxy blocked at $CHAPTER tier (expected) — not gating this chapter" ;;
+    *)         warn "no working API right now — NOT gating your submission (temporary)"
+               warn "you can still submit; for a free fallback see 9Router in class materials" ;;
+  esac
   warn "own sub (claude -p): $CL_OWN_MSG"
   warn "our key (proxy): $CL_PROXY_MSG"
 else
